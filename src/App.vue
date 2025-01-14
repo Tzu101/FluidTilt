@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, onBeforeUnmount } from "vue";
+import { emit, listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core';
 import { debounce } from 'lodash';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -10,11 +12,10 @@ function updateCanvas() {
 
   canvasRef.value.width = gridCols * cellSize;
   canvasRef.value.height = gridRows * cellSize;
-  drawGrid();
 }
 
 
-const cellSize = 30;  // Cell size in pixels
+const cellSize = 10;  // Cell size in pixels
 let gridCols= 0;
 let gridRows = 0;
 let gridPadding = 50;
@@ -25,7 +26,7 @@ const onResize = debounce(() => {
   updateCanvas();
 }, 250);
 
-function drawGrid() {
+function drawGrid(grid: number[][]) {
   const ctx = canvasRef.value!.getContext('2d');
   if (!ctx) {
     return;
@@ -33,7 +34,7 @@ function drawGrid() {
 
   for (let row = 0; row < gridRows; row++) {
     for (let col = 0; col < gridCols; col++) {
-      const blueGradient = Math.floor(Math.random() * 150 + 105);
+      const blueGradient = grid[row][col];
       const greenGradient = blueGradient * 2 / 3;
       ctx.fillStyle = `rgb(${0}, ${greenGradient}, ${blueGradient})`;
       ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
@@ -50,10 +51,26 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
 });
+
+
+type FluidGrid = {
+  data: number[][];
+};
+const UPDATE_GRID_EVENT = "update_grid";
+
+listen<FluidGrid>(UPDATE_GRID_EVENT, (event) => {
+  console.log(event.payload.data);
+  drawGrid(event.payload.data);
+});
+
+async function startSimulation() {
+  await invoke('start_fluid_simulation', { rows: gridRows, cols: gridCols });
+}
 </script>
 
 <template>
   <canvas ref="canvasRef"></canvas>
+  <button @click="startSimulation">Start simulation</button>
 </template>
 
 <style scoped lang="scss">
