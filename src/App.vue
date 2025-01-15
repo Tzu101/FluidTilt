@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, onBeforeUnmount } from "vue";
-import { emit, listen } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core';
 import { debounce } from 'lodash';
 
@@ -13,7 +13,6 @@ function updateCanvas() {
   canvasRef.value.width = gridCols * cellSize;
   canvasRef.value.height = gridRows * cellSize;
 }
-
 
 const cellSize = 10;  // Cell size in pixels
 let gridCols= 0;
@@ -59,18 +58,22 @@ type FluidGrid = {
 const UPDATE_GRID_EVENT = "update_grid";
 
 listen<FluidGrid>(UPDATE_GRID_EVENT, (event) => {
-  console.log(event.payload.data);
   drawGrid(event.payload.data);
 });
 
 async function startSimulation() {
   await invoke('start_fluid_simulation', { rows: gridRows, cols: gridCols });
 }
+
+async function stopSimulation() {
+  await invoke('stop_fluid_simulation');
+}
 </script>
 
 <template>
   <canvas ref="canvasRef"></canvas>
   <button @click="startSimulation">Start simulation</button>
+  <button @click="stopSimulation">Stop simulation</button>
 </template>
 
 <style scoped lang="scss">
