@@ -25,6 +25,7 @@ const onResize = debounce(() => {
   updateCanvas();
 }, 250);
 
+const BLUE_BASE = 45;
 function drawGrid(grid: number[][]) {
   const ctx = canvasRef.value!.getContext('2d');
   if (!ctx) {
@@ -33,7 +34,7 @@ function drawGrid(grid: number[][]) {
 
   for (let row = 0; row < gridRows; row++) {
     for (let col = 0; col < gridCols; col++) {
-      const blueGradient = grid[row][col];
+      const blueGradient = BLUE_BASE * (grid[row][col] + 1);
       const greenGradient = blueGradient * 2 / 3;
       ctx.fillStyle = `rgb(${0}, ${greenGradient}, ${blueGradient})`;
       ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
@@ -87,7 +88,7 @@ canvas {
 }
 </style>
 
-<style>
+<style lang="scss">
 * {
   box-sizing: border-box;
   margin: 0;
@@ -99,6 +100,6 @@ canvas {
 :root {
   overflow: hidden;
 
-  background-color: #023;
+  background-color: rgb(0, 30, 45);
 }
 </style>
