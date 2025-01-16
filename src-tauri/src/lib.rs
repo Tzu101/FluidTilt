@@ -116,9 +116,9 @@ impl Simulation {
         self.particles.push(particle);
     }
 
-    fn simulate_step(&mut self, dt: f32) {
-        let new_fluid_cells = HashSet::new();
-        let mut grid = vec![vec![0; self.cols]; self.rows];
+    fn simulate_step(&mut self, dt: f32) -> Vec<Vec<u8>> {
+        let mut new_fluid_cells = HashSet::new();
+        let mut grid: Vec<Vec<u8>> = vec![vec![0; self.cols]; self.rows];
 
         for particle in self.particles.iter_mut() {
             // Apply forces
@@ -136,17 +136,20 @@ impl Simulation {
             let x_offset = (particle.x - x_cell as f32) / CELL_SIZE;
 
             let y_cell = particle.y.floor() as usize;
-            let y_offset = ((particle.y - CELL_SIZE / 2.0) - y_cell as f32) / CELL_SIZE;
+            let y_offset = (particle.y - y_cell as f32) / CELL_SIZE;
 
             let w1 = (1.0 - x_offset) * (1.0 - y_offset);
             let w2 = x_offset * (1.0 - y_offset);   
             let w3 = x_offset * y_offset;
             let w4 = (1.0 - x_offset) * y_offset;
 
-            let q1 = self.velocity[y_cell][x_cell];
+            new_fluid_cells.insert(Cell::new(x_cell, y_cell));
+            grid[y_cell][x_cell] += 1;
+
+            /*let q1 = self.velocity[y_cell][x_cell];
             let q2 = self.velocity[y_cell][x_cell + 1];
             let q3 = self.velocity[y_cell + 1][x_cell + 1];
-            let q4 = self.velocity[y_cell + 1][x_cell];
+            let q4 = self.velocity[y_cell + 1][x_cell];*/
 
             // Incompressible
 
@@ -172,6 +175,7 @@ impl Simulation {
         }
 
         self.fluid_cells = new_fluid_cells;
+        grid
     }
 }
 
@@ -185,19 +189,16 @@ fn start_fluid_simulation(app: AppHandle, rows: usize, cols: usize) {
     let state = Arc::clone(&state);
 
     thread::spawn(move || {
-        let mut rng = rand::thread_rng();
+        let mut simulation = Simulation::empty(rows, cols);
+        let mut particle = Particle::new(10.0, 10.0);
+        particle.add_velocity(0.0, 0.1);
+        simulation.add_particle(particle);
 
         while state.lock().unwrap().running {
-            thread::sleep(std::time::Duration::from_secs(1));
-
-            let mut grid = vec![vec![0; cols]; rows];
-            for row in 0..rows {
-                for col in 0..cols {
-                    grid[row][col] = rng.gen_range(0..=4);
-                }
-            }
-    
+            let grid = simulation.simulate_step(0.1);
+            
             app.emit(UPDATE_GRID_EVENT, FluidGrid { data: grid }).unwrap();
+            thread::sleep(std::time::Duration::from_secs(1));
         }
     });
 }
