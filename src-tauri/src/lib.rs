@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Emitter, Manager};
 use serde::Serialize;
 
+use std::cmp;
 use std::hash::Hash;
 use std::thread;
 use std::sync::{Arc, Mutex};
@@ -16,14 +17,14 @@ struct FluidGrid {
 const UPDATE_GRID_EVENT: &str = "update_grid";
 
 // Simulation
-#[derive(PartialEq, Eq, Hash)]
-struct Cell {
-    x: usize,
-    y: usize,
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct Vec2<T> {
+    x: T,
+    y: T,
 }
 
-impl Cell {
-    fn new(x: usize, y: usize) -> Self {
+impl<T> Vec2<T> {
+    fn new(x: T, y: T) -> Self {
         Self { x, y }
     }
 }
@@ -38,6 +39,11 @@ struct Particle {
 impl Particle {
     fn new(x: f32, y: f32) -> Self {
         Self { x, y, vx: 0.0, vy: 0.0 }
+    }
+
+    fn set_velocity(&mut self, vx: f32, vy: f32) {
+        self.vx = vx;
+        self.vy = vy;
     }
 
     fn add_velocity(&mut self, vx: f32, vy: f32) {
@@ -73,9 +79,10 @@ struct Simulation {
     rows: usize,
     cols: usize,
 
-    velocity: Vec<Vec<f32>>,
     particles: Vec<Particle>,
-    fluid_cells: HashSet<Cell>,
+    //velocity_x: Vec<Vec<f32>>,
+    //velocity_y: Vec<Vec<f32>>,
+    fluid_cells: HashSet<Vec2<usize>>,
 }
 
 impl Simulation {
@@ -83,7 +90,6 @@ impl Simulation {
         Self {
             rows,
             cols,
-            velocity: vec![vec![0.0; cols + 1]; rows + 1],
             particles: Vec::new(),
             fluid_cells: HashSet::new(),
         }
@@ -99,29 +105,32 @@ impl Simulation {
             let y = rng.gen_range(0..rows);
 
             particles.push(Particle::new(x as f32, y as f32));
-            fluid_cells.insert(Cell::new(x as usize, y as usize));
+            fluid_cells.insert(Vec2::new(x as usize, y as usize));
         }
 
         Self {
             rows,
             cols,
-            velocity: vec![vec![0.0; cols + 1]; rows + 1],
             particles,
             fluid_cells,
         }
     }
 
     fn add_particle(&mut self, particle: Particle) {
-        self.fluid_cells.insert(Cell::new(particle.x as usize, particle.y as usize));
+        self.fluid_cells.insert(Vec2::<usize>::new(particle.x as usize, particle.y as usize));
         self.particles.push(particle);
     }
 
     fn simulate_step(&mut self, dt: f32) -> Vec<Vec<u8>> {
-        let mut new_fluid_cells = HashSet::new();
+        self.fluid_cells.clear();
+        let mut velocity_x = vec![vec![0.0f32; self.cols + 1]; self.rows];
+        let mut velocity_y = vec![vec![0.0f32; self.cols]; self.rows + 1];
         let mut grid: Vec<Vec<u8>> = vec![vec![0; self.cols]; self.rows];
 
+        const CELL_SIZE: f32 = 1.0;
+
+        // Apply forces + Particle -> Velocity
         for particle in self.particles.iter_mut() {
-            // Apply forces
             const GRAVITY: f32 = 9.81;
             particle.add_velocity(0.0, GRAVITY * dt);
             particle.apply_velocity(dt);
@@ -129,52 +138,78 @@ impl Simulation {
 
             // TODO push particles out of solids
 
-            // Particle -> Velocity
-            const CELL_SIZE: f32 = 1.0;
-
             let x_cell = particle.x.floor() as usize;
             let x_offset = (particle.x - x_cell as f32) / CELL_SIZE;
 
             let y_cell = particle.y.floor() as usize;
             let y_offset = (particle.y - y_cell as f32) / CELL_SIZE;
 
-            let w1 = (1.0 - x_offset) * (1.0 - y_offset);
-            let w2 = x_offset * (1.0 - y_offset);   
-            let w3 = x_offset * y_offset;
-            let w4 = (1.0 - x_offset) * y_offset;
-
-            new_fluid_cells.insert(Cell::new(x_cell, y_cell));
+            self.fluid_cells.insert(Vec2::<usize>::new(x_cell, y_cell));
             grid[y_cell][x_cell] += 1;
 
-            /*let q1 = self.velocity[y_cell][x_cell];
-            let q2 = self.velocity[y_cell][x_cell + 1];
-            let q3 = self.velocity[y_cell + 1][x_cell + 1];
-            let q4 = self.velocity[y_cell + 1][x_cell];*/
+            let wx0 = if x_cell <= 0 { 0.0 } else { x_offset };
+            let wx1 = if x_cell >= self.cols { 0.0 } else { 1.0 - x_offset };
+            let wy0 = if y_cell <= 0 { 0.0 } else { y_offset };
+            let wy1 = if y_cell >= self.rows { 0.0 } else { 1.0 - y_offset };
 
-            // Incompressible
-
-            // Velocity -> Particle
+            velocity_x[y_cell][x_cell] += particle.vx * wx0;
+            velocity_x[y_cell][x_cell + 1] += particle.vx * wx1;
+            velocity_y[y_cell][x_cell] += particle.vy * wy0;
+            velocity_y[y_cell + 1][x_cell] += particle.vy * wy1;
         }
 
-        for row in 0..self.rows{
+        // Incompressible
+        let mut incompressed_velocity_x = vec![vec![0.0f32; self.cols + 1]; self.rows];
+        let mut incompressed_velocity_y = vec![vec![0.0f32; self.cols]; self.rows + 1];
+        for row in 0..self.rows {
             for col in 0..self.cols {
-                // U, V velocity components
-                let u0 = col;
-                let u1 = col + 1;
-                let v0 = row;
-                let v1 = row + 1;
+                if !self.fluid_cells.contains(&Vec2::new(col, row)) {
+                    continue;
+                }
+
+                let x0 = col;
+                let x1 = col + 1;
+                let y0 = row;
+                let y1 = row + 1;
 
                 // Ignore solids
-                let left_solid = if u0 == 0 { 0.0 } else { 1.0 };
-                let right_solid = if u1 == self.cols { 0.0 } else { 1.0 };
-                let top_solid = if v0 == 0 { 0.0 } else { 1.0 };
-                let bottom_solid = if v1 == self.rows { 0.0 } else { 1.0 };
+                let left_solid = if x0 == 0 { 0.0 } else { 1.0 };
+                let right_solid = if x1 == self.cols { 0.0 } else { 1.0 };
+                let top_solid = if y0 == 0 { 0.0 } else { 1.0 };
+                let bottom_solid = if y1 == self.rows { 0.0 } else { 1.0 };
 
-                let fluid_neighbours: f32 = 4.0 - left_solid - right_solid - top_solid - bottom_solid;
+                let fluid_neighbours: f32 = left_solid + right_solid + top_solid + bottom_solid;
+
+                let dx = velocity_x[y0][x1] - velocity_x[y0][x0];
+                let dy = velocity_y[y1][x0] - velocity_y[y0][x0];
+                let divergence = dx + dy;
+                
+                incompressed_velocity_x[y0][x0] = velocity_x[y0][x0] + left_solid * divergence / fluid_neighbours;
+                incompressed_velocity_x[y0][x1] = velocity_x[y0][x1] - right_solid * divergence / fluid_neighbours;
+                incompressed_velocity_y[y0][x0] = velocity_y[y0][x0] + top_solid * divergence / fluid_neighbours;
+                incompressed_velocity_y[y1][x0] = velocity_y[y1][x0] - bottom_solid * divergence / fluid_neighbours;
             }
         }
 
-        self.fluid_cells = new_fluid_cells;
+        // Velocity -> Particle
+        for particle in self.particles.iter_mut() {
+            let x_cell = particle.x.floor() as usize;
+            let x_offset = (particle.x - x_cell as f32) / CELL_SIZE;
+
+            let y_cell = particle.y.floor() as usize;
+            let y_offset = (particle.y - y_cell as f32) / CELL_SIZE;
+
+            let wx0 = if x_cell <= 0 { 0.0 } else { x_offset };
+            let wx1 = if x_cell >= self.cols { 0.0 } else { 1.0 - x_offset };
+            let wy0 = if y_cell <= 0 { 0.0 } else { y_offset };
+            let wy1 = if y_cell >= self.rows { 0.0 } else { 1.0 - y_offset };
+
+            let vx = incompressed_velocity_x[y_cell][x_cell] * wx0 + incompressed_velocity_x[y_cell][x_cell + 1] * wx1;
+            let vy = incompressed_velocity_y[y_cell][x_cell] * wy0 + incompressed_velocity_y[y_cell + 1][x_cell] * wy1;
+
+            particle.set_velocity(vx, vy);
+        }
+
         grid
     }
 }
@@ -189,16 +224,17 @@ fn start_fluid_simulation(app: AppHandle, rows: usize, cols: usize) {
     let state = Arc::clone(&state);
 
     thread::spawn(move || {
-        let mut simulation = Simulation::empty(rows, cols);
-        let mut particle = Particle::new(10.0, 10.0);
-        particle.add_velocity(0.0, 0.1);
-        simulation.add_particle(particle);
+        let mut simulation = Simulation::rand(rows, cols, 50);
+
+        const FPS: i32 = 30;
+        const DT: f32 = 1.0 / FPS as f32;
+        const WAIT_TIME: std::time::Duration = std::time::Duration::from_millis(1000 / FPS as u64);
 
         while state.lock().unwrap().running {
-            let grid = simulation.simulate_step(0.1);
+            let grid = simulation.simulate_step(DT);
             
             app.emit(UPDATE_GRID_EVENT, FluidGrid { data: grid }).unwrap();
-            thread::sleep(std::time::Duration::from_secs(1));
+            thread::sleep(WAIT_TIME);
         }
     });
 }

@@ -4,6 +4,11 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core';
 import { debounce } from 'lodash';
 
+// Reference
+// https://github.com/matthias-research/pages/blob/master/tenMinutePhysics/18-flip.pdf
+// https://github.com/matthias-research/pages/blob/master/tenMinutePhysics/18-flip.html
+// https://www.youtube.com/watch?v=XmzBREkK8kY
+
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 function updateCanvas() {
   if (!canvasRef.value){
@@ -14,7 +19,7 @@ function updateCanvas() {
   canvasRef.value.height = gridRows * cellSize;
 }
 
-const cellSize = 10;  // Cell size in pixels
+const cellSize = 50;  // Cell size in pixels
 let gridCols= 0;
 let gridRows = 0;
 let gridPadding = 50;
